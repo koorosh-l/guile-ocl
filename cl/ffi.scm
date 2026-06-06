@@ -9,7 +9,8 @@
   #:use-module (cl types basic)
   #:use-module (cl types derived)
   #:use-module (system foreign-library)
-  #:use-module (rnrs bytevectors))
+  #:use-module (rnrs bytevectors)
+  #:export (import-all))
 
 (define-syntax import-func
   (lambda (x)
@@ -33,23 +34,22 @@
 	 [(t) t])))
     (syntax-case x ()
       [(_ name return args)
-       #`(eval-when (load eval)
-	   (define-public name
-	     (with-exception-handler
-		 (lambda (e)
+       #`(define-public name
+	   (with-exception-handler
+	       (lambda (e)
+		 ;; (format (current-error-port)
+		 ;;	 "looking up ~a failed in ~a\n" 'name cl-link)
+		 (lambda a
 		   (format (current-error-port)
-			   "looking up ~a failed in ~a\n" 'name cl-link)
-		   (lambda a
-		     (format (current-error-port)
-			     "looking up ~a failed\n" 'name)
-		     #f))
-	       (lambda ()
-		 (foreign-library-function
-		  cl-link
-		  #,(namer #'name)
-		  #:return-type #,(returner #'return)
-		  #:arg-types #,(arg-types #'args)))
-	       #:unwind? #t)))])))
+			   "looking up ~a failed\n" 'name)
+		   #f))
+	     (lambda ()
+	       (foreign-library-function
+		cl-link
+		#,(namer #'name)
+		#:return-type #,(returner #'return)
+		#:arg-types #,(arg-types #'args)))
+	     #:unwind? #t))])))
 
 (define-syntax import-all
   (lambda (x)
@@ -70,4 +70,4 @@
 (define cl_dx9_device_source_intel cl_uint)
 (define cl_dx9_media_adapter_type_khr cl_uint)
 (define HANDLE size_t)
-(import-all)
+(eval-when (load eval) (import-all))

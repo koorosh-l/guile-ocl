@@ -20,12 +20,7 @@
   #:use-module ((system foreign) #:prefix ffi:)
   #:use-module ((system foreign-library) #:prefix ffl:))
 
-;; (define-inlinable (wrap type p)
-;;   ((opq:get-opaque-type-wraper type) p))
-;; (define-inlinable (unwrap type v)
-;;   (if (and (ffi:pointer? v) (ffi:null-pointer? v))
-;;       ffi:%null-pointer
-;;       ((opq:get-opaque-type-unrwaper type) v)))
+;; (eval-when (load eval) (import-all))
 (define (list->bv type l)
   (let ([bv (allocate type (length l))])
     (for-each (lambda (ix v)
@@ -132,7 +127,7 @@
       [(_ (name args ...) return body ...)
        #`(begin
 	   (define* (#,(k-case #'name) args ...)
-	     (let ([#,(datum->syntax x 'api) name])
+	     (let ([#,(datum->syntax x 'api) (@ (cl ffi) name)])
 	       body ...))
 	   (module-export! (current-module) '(#,(k-case #'name))))])))
 (define-syntax-rule (def-get-info name info-key unwrapper)
@@ -1231,104 +1226,104 @@
 ;;		  (sizeof '*)
 ;;		  (unwrap 'cl_mem abuff)))
 
-1111111
-(use-modules (cl array))
-(define count 1024)
-(define plat
-  (list-ref (get-platform-ids 10) 0))
-(define d (car (get-device-ids plat)))
-(define ctx (create-context (list d)))
+;; 1111111
+;; (use-modules (cl array))
+;; (define count 1024)
+;; (define plat
+;;   (list-ref (get-platform-ids 10) 0))
+;; (define d (car (get-device-ids plat)))
+;; (define ctx (create-context (list d)))
 
-(define il-bv (call-with-input-file
-		  "/home/quasikote/proj/scheme-gpgpu/playground/kernel.spv"
-		(@ (ice-9 binary-ports) get-bytevector-all)))
-(define prog (create-program-with-il ctx il-bv))
-(define kernel (begin (build-program
-		       prog (list d)
-		       #:options "-cl-fast-relaxed-math")
-		      (create-kernel prog "axpy")))
+;; (define il-bv (call-with-input-file
+;;		  "/home/quasikote/proj/scheme-gpgpu/playground/kernel.spv"
+;;		(@ (ice-9 binary-ports) get-bytevector-all)))
+;; (define prog (create-program-with-il ctx il-bv))
+;; (define kernel (begin (build-program
+;;		       prog (list d)
+;;		       #:options "-cl-fast-relaxed-math")
+;;		      (create-kernel prog "axpy")))
 
-(define abuff
-  (create-buffer
-   ctx
-   (logior cln:CL_MEM_READ_WRITE cln:CL_MEM_ALLOC_HOST_PTR)
-   %null-pointer
-   (* count (sizeof float))))
-(define bbuff
-  (create-buffer
-   ctx
-   (logior cln:CL_MEM_READ_WRITE cln:CL_MEM_ALLOC_HOST_PTR)
-   %null-pointer
-   (* count (sizeof float))))
+;; (define abuff
+;;   (create-buffer
+;;    ctx
+;;    (logior cln:CL_MEM_READ_WRITE cln:CL_MEM_ALLOC_HOST_PTR)
+;;    %null-pointer
+;;    (* count (sizeof float))))
+;; (define bbuff
+;;   (create-buffer
+;;    ctx
+;;    (logior cln:CL_MEM_READ_WRITE cln:CL_MEM_ALLOC_HOST_PTR)
+;;    %null-pointer
+;;    (* count (sizeof float))))
 
-(set-kernel-arg kernel 0 `(10 . ,cl_float))
-(set-kernel-arg kernel 1 abuff)
-(set-kernel-arg kernel 2 bbuff)
+;; (set-kernel-arg kernel 0 `(10 . ,cl_float))
+;; (set-kernel-arg kernel 1 abuff)
+;; (set-kernel-arg kernel 2 bbuff)
 
-(define q (create-command-queue-with-properties
-	   ctx d
-	   #:properties
-	   (make-prop-bv cl_command_queue_properties
-			 cln:CL_QUEUE_PROPERTIES
-			 cln:CL_QUEUE_PROFILING_ENABLE)))
-(define aptr (enqueue-map-buffer
-	      q abuff
-	      (logior cln:CL_MAP_READ cln:CL_MAP_WRITE)
-	      (* count (sizeof float))))
-(define bptr (enqueue-map-buffer
-	      q bbuff
-	      (logior cln:CL_MAP_READ cln:CL_MAP_WRITE)
-	      (* count (sizeof float))))
-(define abv (ffi:pointer->bytevector aptr (* count (sizeof float))))
-(define bbv (ffi:pointer->bytevector bptr (* count (sizeof float))))
-(bv->f32vector! abv)
-(bv->f32vector! bbv)
-(array-map! abv
-	    (lambda ()
-	      (random 10)))
-(array-map! bbv
-	    (lambda ()
-	      (random 10)))
-(enqueue-unmap-mem-object q abuff aptr)
-(enqueue-unmap-mem-object q bbuff bptr)
-(define event (opq:opaque-instance 'cl_event 0))
-(display "----------------------------------------\n")
-(enqueue-nd-range-kernel q kernel `(,count)
-			 #:local-work-size `(32)
-			 #:ret-event (opq:& event))
-(finish q)
-(format (current-output-port)
-	"~a ~a ~a\n"
-	(string-take (get-device-info d cln:CL_DEVICE_NAME 128)
-		     18)
-	count
-	(-
-	 (get-event-profiling-info
-	  event
-	  cln:CL_PROFILING_COMMAND_END 8)
-	 (get-event-profiling-info
-	  event
-	  cln:CL_PROFILING_COMMAND_START 8)))
-(display "----------------------------------------\n")
-(release-mem-object abuff)
-(release-mem-object bbuff)
-(release-command-queue q)
-(release-program prog)
-(release-context ctx)
-(define (test)
-  (enqueue-nd-range-kernel
-   q kernel `(,count)
-   #:ret-event (opq:& event))
-  (finish q)
-  (format (current-output-port)
-	  "~a ~a ~a\n"
-	  (string-take (get-device-info d cln:CL_DEVICE_NAME 128)
-		       18)
-	  count
-	  (-
-	   (get-event-profiling-info
-	    event
-	    cln:CL_PROFILING_COMMAND_END 8)
-	   (get-event-profiling-info
-	    event
-	    cln:CL_PROFILING_COMMAND_START 8))))
+;; (define q (create-command-queue-with-properties
+;;	   ctx d
+;;	   #:properties
+;;	   (make-prop-bv cl_command_queue_properties
+;;			 cln:CL_QUEUE_PROPERTIES
+;;			 cln:CL_QUEUE_PROFILING_ENABLE)))
+;; (define aptr (enqueue-map-buffer
+;;	      q abuff
+;;	      (logior cln:CL_MAP_READ cln:CL_MAP_WRITE)
+;;	      (* count (sizeof float))))
+;; (define bptr (enqueue-map-buffer
+;;	      q bbuff
+;;	      (logior cln:CL_MAP_READ cln:CL_MAP_WRITE)
+;;	      (* count (sizeof float))))
+;; (define abv (ffi:pointer->bytevector aptr (* count (sizeof float))))
+;; (define bbv (ffi:pointer->bytevector bptr (* count (sizeof float))))
+;; (bv->f32vector! abv)
+;; (bv->f32vector! bbv)
+;; (array-map! abv
+;;	    (lambda ()
+;;	      (random 10)))
+;; (array-map! bbv
+;;	    (lambda ()
+;;	      (random 10)))
+;; (enqueue-unmap-mem-object q abuff aptr)
+;; (enqueue-unmap-mem-object q bbuff bptr)
+;; (define event (opq:opaque-instance 'cl_event 0))
+;; (display "----------------------------------------\n")
+;; (enqueue-nd-range-kernel q kernel `(,count)
+;;			 #:local-work-size `(32)
+;;			 #:ret-event (opq:& event))
+;; (finish q)
+;; (format (current-output-port)
+;;	"~a ~a ~a\n"
+;;	(string-take (get-device-info d cln:CL_DEVICE_NAME 128)
+;;		     18)
+;;	count
+;;	(-
+;;	 (get-event-profiling-info
+;;	  event
+;;	  cln:CL_PROFILING_COMMAND_END 8)
+;;	 (get-event-profiling-info
+;;	  event
+;;	  cln:CL_PROFILING_COMMAND_START 8)))
+;; (display "----------------------------------------\n")
+;; (release-mem-object abuff)
+;; (release-mem-object bbuff)
+;; (release-command-queue q)
+;; (release-program prog)
+;; (release-context ctx)
+;; (define (test)
+;;   (enqueue-nd-range-kernel
+;;    q kernel `(,count)
+;;    #:ret-event (opq:& event))
+;;   (finish q)
+;;   (format (current-output-port)
+;;	  "~a ~a ~a\n"
+;;	  (string-take (get-device-info d cln:CL_DEVICE_NAME 128)
+;;		       18)
+;;	  count
+;;	  (-
+;;	   (get-event-profiling-info
+;;	    event
+;;	    cln:CL_PROFILING_COMMAND_END 8)
+;;	   (get-event-profiling-info
+;;	    event
+;;	    cln:CL_PROFILING_COMMAND_START 8))))

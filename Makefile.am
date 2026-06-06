@@ -34,7 +34,7 @@ SOURCES =		\
 
 
 NODIST_SOURCES =	\
-  cl/config.scm
+  cl/config.scm.in
 
 CLEANFILES +=		\
   $(TESTS:tests/%.scm=%.log)
