@@ -1,5 +1,5 @@
-GOBJECTS = $(SOURCES:%.scm=%.go)
-nobase_mod_DATA = $(SOURCES) $(NOCOMP_SOURCES)
+GOBJECTS = $(SOURCES:%.scm=%.go) $(NODIST_SOURCES:%.scm=%.go)
+nobase_mod_DATA = $(SOURCES) $(NOCOMP_SOURCES) $(NODIST_SOURCES)
 nobase_go_DATA = $(GOBJECTS)
 
 guile_install_go_files = install-nobase_goDATA
@@ -18,18 +18,31 @@ godir=$(libdir)/guile/$(GUILE_EFFECTIVE_VERSION)/site-ccache
 
 SOURCES =		\
   cl.scm		\
-  cl/types.scm	\
-  cl/consts.scm	\
-  cl/enums.scm	\
-  cl/ffi.scm
+  cl/array.scm		\
+  cl/enums.scm		\
+  cl/ffi.scm		\
+  cl/functions.scm	\
+  cl/spec.scm		\
+  cl/structs.scm	\
+  cl/types.scm		\
+  cl/types/basic.scm	\
+  cl/types/derived.scm	\
+  cl/types/error.scm	\
+  cl/types/info.scm	\
+  cl/types/opaque.scm	\
+  cl/config.scm
 
-CLEANFILES +=						\
+
+NODIST_SOURCES =	\
+  cl/config.scm
+
+CLEANFILES +=		\
   $(TESTS:tests/%.scm=%.log)
 
 TEST_EXTENSIONS = .scm
 SCM_LOG_COMPILER = $(top_builddir)/pre-inst-env $(GUILE)
 AM_SCM_LOG_FLAGS = --no-auto-compile -L "$(top_srcdir)"
 
-EXTRA_DIST +=					\
-  pre-inst-env.in				\
+EXTRA_DIST +=		\
+  pre-inst-env.in	\
   README.org

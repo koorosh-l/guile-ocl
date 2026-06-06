@@ -11,3 +11,4 @@
 /pre-inst-env
 /configure~
 /build/
+/cl/config.scm
