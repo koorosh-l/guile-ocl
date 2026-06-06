@@ -1,0 +1,8 @@
+(define-module (cl config))
+(eval-when (compile eval load expand)
+  (define-public so-path
+    (string-append "@OPENCL_LIBDIR@" "/libOpenCL.so"))
+  (display "------------------------\n")
+  (display so-path)
+  (newline)
+  (display "------------------------\n"))

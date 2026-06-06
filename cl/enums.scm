@@ -9,7 +9,7 @@
        #`(begin
 	   (define-public group-name `((name . val) ...))
 	   (define-public name val) ...)])))
-
+(define-public CL_TRUE 1)
 (define-public CL_A 4273)
 (define-public CL_ABGR 4291)
 (define-public CL_ACCELERATOR_CONTEXT_INTEL 16530)
@@ -1221,7 +1221,6 @@
 (define-public CL_SVM_INFO_PROPERTIES_KHR 8330)
 (define-public CL_SVM_INFO_SIZE_KHR 16796)
 (define-public CL_SVM_INFO_TYPE_INDEX_KHR 8328)
-(define-public CL_TRUE 1)
 (define-public CL_UCHAR_MAX 255)
 (define-public CL_UINT_MAX #xffffffff)
 (define-public CL_ULONG_MAX #xFFFFFFFFFFFFFFFF)
