@@ -136,7 +136,7 @@
 				(bytevector->pointer platforms-bv)
 				(bytevector->pointer ret-count-bv))])
     (if (< ret 0)
-	ret
+	(find-err ret)
 	(begin
 	  (map (lambda (i)
 		 (wrap 'cl_platform_id
