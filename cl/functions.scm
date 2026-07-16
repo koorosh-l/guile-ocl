@@ -20,7 +20,6 @@
   #:use-module ((system foreign) #:prefix ffi:)
   #:use-module ((system foreign-library) #:prefix ffl:))
 
-;; (eval-when (load eval) (import-all))
 (define (list->bv type l)
   (let ([bv (allocate type (length l))])
     (for-each (lambda (ix v)
@@ -40,31 +39,11 @@
 (define pointer-address ffi:pointer-address)
 (define string->pointer ffi:string->pointer)
 
-(define (make-prop-bv type . l)
+(define-public (make-prop-bv type . l)
   (if (zero? (length l))
       %null-pointer
       (bytevector->pointer
        (list->bv type (append l '(0))))))
-
-(define (ar-count-name sym)
-  (let ([str (symbol->string sym)])
-    (or (and (string-suffix? "_size" str)
-	     (string->symbol (string-drop-right str 5)))
-	(and (string-prefix? "num_" str)
-	     (string->symbol (string-drop str 4))))))
-(define (array-and-count-names args)
-  (define ptr-names
-    (filter-map (match-lambda
-		  [(name _ 'ptr _) name]
-		  [else #f])
-		args))
-  (filter (match-lambda
-	    [(cname . aname) (member aname ptr-names)])
-	  (filter-map (match-lambda
-			[((? ar-count-name name) (or 'cl_uint 'size_t) 'no-ptr _)
-			 (cons name (ar-count-name name))]
-			[else #f])
-		      args)))
 
 (eval-when (expand load compile eval)
   (define-peg-pattern num body
@@ -115,8 +94,6 @@
       (string-join
        (cdr (map cadr (peg:tree (match-pattern name str)))) "-")))))
 
-(define (get-type-checker . a) identity)
-
 (define-syntax def-cl
   (lambda (x)
     (define (k-case syn)
@@ -151,13 +128,7 @@
     (when (< i bound)
       (f i)
       (loop (1+ i)))))
-;; (define-inlinable (string-reader bv n)
-;;   (string-take
-;;    (list->string
-;;     (map integer->char (bytevector->u8-list bv)))
-;;    (1- n)))
-;;generalize bv making,reading,writing based on cl type
-;;fix double import type warnings
+
 (def-cl (clGetPlatformIDs count) cl_int
   (let* ([platforms-bv (allocate cl_platform_id  count)]
 	 [ret-count-bv (allocate cl_uint 1)]
@@ -271,7 +242,6 @@
 	(begin
 	  (cons (refbv cl_ulong host-stamp   0)
 		(refbv cl_ulong device-stamp 0))))))
-
 (def-cl (clGetHostTimer dev) cl_int
   (let* ([host-stamp (allocate cl_ulong 1)]
 	 [ret (api (unwrap 'cl_device_id dev)
@@ -302,7 +272,6 @@
     (if (< err 0)
 	(find-error err)
 	(wrap 'cl_context ctx))))
-
 (def-cl (clCreateContextFromType dev-type
 				 #:key
 				 (properties %null-pointer)
@@ -324,7 +293,6 @@
   (find-error (clRetainContext (unwrap 'cl_context ctx))))
 (def-cl (clReleaseContext ctx) cl_int
   (find-error (clReleaseContext (unwrap 'cl_context ctx))))
-;;check for context properties
 (def-cl (clGetContextInfo context param-name count) cl_int
   (let* ([pbv (allocate-info-bv 'context-info param-name count)]
 	 [ret-size-bv (allocate size_t 1)]
@@ -361,12 +329,10 @@
     (if (< err 0)
 	(resolve-error 'cl-error err)
 	(wrap 'cl_command_queue q))))
-
 (def-cl (clRetainCommandQueue q) cl_int
   (api (unwrap 'cl_command_queue q)))
 (def-cl (clReleaseCommandQueue q) cl_int
   (api (unwrap 'cl_command_queue q)))
-
 (def-cl (clGetCommandQueueInfo q param-name count) cl_int
   (let* ([pbv (allocate-info-bv 'queue-info param-name count)]
 	 [ret-size-bv (allocate size_t 1)]
@@ -392,7 +358,6 @@
     (if (< err 0)
 	(find-error err)
 	(wrap 'cl_mem mem))))
-
 (def-cl (clCreateBufferWithProperties ctx properties flags size ptr)
   cl_mem
   (let* ([err-bv (allocate cl_int 1)]
@@ -407,7 +372,6 @@
     (if (< err 0)
 	(find-error err)
 	(wrap 'cl_mem mem))))
-
 (def-cl (clCreateSubBuffer buffer flags
 			   #:key
 			   (offset %null-pointer)
@@ -436,7 +400,6 @@
     (if (< err 0)
 	(find-error err)
 	(wrap 'cl_mem mem))))
-
 (def-cl (clCreateImageWithProperties ctx properties
 				     flags image-format
 				     image-desc ptr)
@@ -539,11 +502,8 @@
 	   (make-pointer err-bv))]
 	 [err (bytevector-s32-native-ref err-bv 0)])
     (if (< err 0) (find-error err) ret)))
-
 (def-cl (clRetainSampler sampler) cl_int (find-error (api (unwrap 'cl_sampler sampler))))
 (def-cl (clReleaseSampler sampler) cl_int (find-error (api (unwrap 'cl_sampler sampler))))
-
-;;unchecked
 (def-cl (clGetSamplerInfo sampler param-name count) cl_uint
   (let* ([pbv (allocate-info-bv 'pipe-info param-name count)]
 	 [ret-size-bv (allocate size_t 1)]
@@ -581,7 +541,6 @@
     (if (< err 0)
 	(find-error err)
 	(wrap 'cl_program ret))))
-
 (def-cl (clCreateProgramWithBinary ctx devs bins) cl_program
   (let* ([err-bv (allocate cl_int 1)]
 	 [dev-count (length devs)]
@@ -610,9 +569,7 @@
      [(< err 0) (find-error err)]
      [(any (cut < <> 0) status) (map find-error status)]
      [else ret])))
-
 (def-cl (clCreateProgramWithBuiltInKernels ctx devs kernel-names)
-  ;;ifi can't test
   cl_program
   (let* ([err-bv (allocate cl_int 1)]
 	 [dev-list  (list->bv size_t devs)]
@@ -628,7 +585,6 @@
     (if (< err 0)
 	(find-error err)
 	ret)))
-
 (def-cl (clCreateProgramWithIL ctx il-bv) cl_program
   (let* ([err-bv (allocate cl_int 1)]
 	 [ret (clCreateProgramWithIL
@@ -640,12 +596,10 @@
     (if (< err 0)
 	(find-error err)
 	(wrap 'cl_program ret))))
-
 (def-cl (clRetainProgram program) cl_int
   (find-error (api (unwrap 'cl_program program))))
 (def-cl (clReleaseProgram program) cl_int
   (find-error (api (unwrap 'cl_program program))))
-
 (def-cl (clBuildProgram program devs
 			#:key
 			(options "")
@@ -715,11 +669,9 @@
     (if (< err 0)
 	(find-error err)
 	(wrap 'cl_program ret))))
-
 (def-cl (clSetProgramReleaseCallback program pfn_notify user_data)
   cl_int
   (api (unwrap 'cl_program program) pfn_notify user_data))
-
 (def-cl (clSetProgramSpecializationConstant program spec_id spec_size spec_value)
   cl_int
   (clSetProgramSpecializationConstant program spec_id spec_size spec_value))
@@ -742,7 +694,6 @@
 	(find-error ret)
 	(read-info 'program-info param-name param-bv
 		   (bytes->count 'program-info param-name ret-size)))))
-
 (def-cl (clGetProgramBuildInfo program
 			       device
 			       param-name
@@ -772,7 +723,6 @@
     (if (< err 0)
 	(find-error err)
 	(wrap 'cl_kernel ret))))
-
 (def-cl (clCreateKernelsInProgram program count)
   cl_int
   (let* ([num-ret (allocate cl_uint 1)]
@@ -795,7 +745,12 @@
 			     (bytevector->pointer err-bv))]
 	 [err (refbv cl_int err-bv 0)])
     (if (< err 0) (find-error err) (wrap 'cl_kernel ret))))
-
+(def-cl (clRetainKernel kernel)
+  cl_int
+  (find-error (api (unwrap 'cl_kernel kernel))))
+(def-cl (clReleaseKernel kernel)
+  cl_int
+  (find-error (api (unwrap 'cl_kernel kernel))))
 (def-cl (clSetKernelArg kernel arg-index arg-value) cl_int
   (let* ([len (cond
 	       [(bytevector? arg-value) (bytevector-length arg-value)]
@@ -819,11 +774,9 @@
 		   len
 		   (bytevector->pointer ptr))])
     (find-error ret)))
-
 (def-cl (clSetKernelArgSVMPointer kernel arg-index arg-value)
   cl_int
   (find-error (api (unwrap 'cl_kernel kernel) arg-index arg-value)))
-
 (def-cl (clSetKernelExecInfo kernel
 			     param-name
 			     param-value-size
@@ -831,7 +784,6 @@
   cl_int
   (api (unwrap 'cl_kernel kernel)
        param-name param-value-size param-value))
-
 (def-cl (clGetKernelInfo kernel param-name count)
   cl_int
   (let* ([pbv (allocate-info-bv 'kernel-info param-name count)]
@@ -846,6 +798,110 @@
 	(find-error ret)
 	(read-info 'kernel-info param-name pbv
 		   (bytes->count 'kernel-info param-name ret-size)))))
+(def-cl (clGetKernelArgInfo kernel index param-name count)
+  cl_int
+  (let* ([pbv (allocate-info-bv 'kernel-arg-info param-name count)]
+	 [ret-size-bv (allocate size_t 1)]
+	 [ret (api (unwrap 'cl_kernel kernel)
+		   index
+		   param-name
+		   (bytevector-length pbv)
+		   (bytevector->pointer pbv)
+		   (bytevector->pointer ret-size-bv))]
+	 [ret-size (refbv size_t ret-size-bv 0)])
+    (if (< ret 0)
+	(resolve-error 'cl-error ret)
+	(read-info 'kernel-arg-info param-name pbv
+		   (bytes->count 'kernel-arg-info
+				 param-name ret-size)))))
+(def-cl (clGetKernelWorkGroupInfo kernel device param-name count)
+  cl_int
+  (let* ([pbv (allocate-info-bv 'kernel-work-group-info
+				param-name count)]
+	 [ret-size-bv (allocate size_t 1)]
+	 [ret (api (unwrap 'cl_kernel kernel)
+		   (unwrap 'cl_device_id device)
+		   param-name
+		   (bytevector-length pbv)
+		   (bytevector->pointer pbv)
+		   (bytevector->pointer ret-size-bv))]
+	 [ret-size (refbv size_t ret-size-bv 0)])
+    (if (< ret 0)
+	(resolve-error 'cl-error ret)
+	(read-info 'kernel-work-group-info param-name pbv
+		   (bytes->count 'kernel-work-group-info
+				 param-name ret-size)))))
+;; (def-cl (clGetKernelSubGroupInfo kernel device param-name input-value)
+;;   cl_int
+;;   (api (unwrap 'cl_kernel kernel)
+;;        (unwrap 'cl_device_id device)
+;;        param-name
+;;        input_value_size
+;;        input_value
+;;        param_value_size
+;;        param_value
+;;        param_value_size_ret))
+(def-cl (clWaitForEvents events)
+  cl_int
+  (find-error (api (length events)
+		   (bytevector->pointer
+		    (list->bv 'cl_event events)))))
+(def-cl (clGetEventInfo event param-name count)
+  cl_int
+  (let* ([pbv (allocate-info-bv 'event-info param-name count)]
+	 [ret-size-bv (allocate size_t 1)]
+	 [ret (api (unwrap 'cl_event event)
+		   param-name
+		   (bytevector-length pbv)
+		   (bytevector->pointer pbv)
+		   (bytevector->pointer ret-size-bv))]
+	 [ret-size (refbv size_t ret-size-bv 0)])
+    (if (< ret 0)
+	(resolve-error 'cl-error ret)
+	(read-info 'event-info
+		   param-name
+		   pbv
+		   (bytes->count 'event-info param-name ret-size)))))
+(def-cl (clCreateUserEvent ctx)
+  cl_event
+  (let* ([err-bv (allocate cl_int 1)]
+	 [ev (api (unwrap 'cl_context ctx)
+		  (bytevector->pointer err-bv))]
+	 [err (refbv cl_int err-bv 0)])
+    (if (< err 0)
+	(resolve-error 'cl-error err)
+	(wrap 'cl_event ev))))
+(def-cl (clRetainEvent event) cl_int
+  (find-error (api (unwrap 'cl_event event))))
+(def-cl (clReleaseEvent event) cl_int
+  (find-error (api (unwrap 'cl_event event))))
+(def-cl (clSetUserEventStatus event status)
+  cl_int
+  (find-error (api (unwrap 'cl_event event) status)))
+(def-cl (clSetEventCallback event type pfn-notify user-data)
+  cl_int
+  (find-error
+   (api (unwrap 'cl_event event)
+	type
+	pfn-notify
+	user-data)))
+(def-cl (clGetEventProfilingInfo event param-name count)
+  ;; event param_name param_value_size param_value param_value_size_ret
+  cl_int
+  (let* ([pbv (allocate-info-bv 'event-profiling-info param-name count)]
+	 [ret-size-bv (allocate size_t 1)]
+	 [ret (api (unwrap 'cl_event event)
+		   param-name
+		   (bytevector-length pbv)
+		   (bytevector->pointer pbv)
+		   (bytevector->pointer ret-size-bv))]
+	 [ret-size (refbv size_t ret-size-bv 0)])
+    (if (< ret 0)
+	(resolve-error 'cl-error ret)
+	(read-info 'event-profiling-info
+		   param-name
+		   pbv
+		   (bytes->count 'event-profiling-info param-name ret-size)))))
 
 (def-cl (clFlush q) cl_int
   (find-error (api (unwrap 'cl_command_queue q))))
@@ -879,7 +935,6 @@
 	      %null-pointer
 	      (bytevector->pointer events-bv))
 	  ret-event))))
-
 (def-cl (clEnqueueReadBufferRect q
 				 buffer
 				 buffer-origin
@@ -948,6 +1003,51 @@
 	  (if (null? events)
 	      ffi:%null-pointer
 	      (bytevector->pointer events-bv))
+	  ret-event))))
+
+(def-cl (clEnqueueWriteBufferRect q
+				  buffer
+				  buffer-origin
+				  host-origin
+				  region
+				  buffer-row-pitch
+				  buffer-slice-pitch
+				  host-row-pitch
+				  host-slice-pitch
+				  ptr
+				  #:key
+				  (block #t)
+				  (events '())
+				  (ret-event %null-pointer))
+  cl_int
+  (let* ([events-bv (list->bv '* events)]
+	 [buffer-origin      (list->bv 'size_t buffer-origin)]
+	 [host-origin        (list->bv 'size_t host-origin)]
+	 [region             (list->bv 'size_t region)]
+	 [buffer-row-pitch   (list->bv 'size_t buffer-row-pitch)]
+	 [buffer-slice-pitch (list->bv 'size_t buffer-slice-pitch)]
+	 [host-row-pitch     (list->bv 'size_t host-row-pitch)]
+	 [host-slice-pitch   (list->bv 'size_t host-slice-pitch)])
+    (find-error
+     (api (unwrap 'cl_command_queue q)
+	  (unwrap 'cl_mem buffer)
+	  (if block cln:CL_TRUE cln:CL_FALSE)
+	  (bytevector->pointer buffer-origin)
+	  (bytevector->pointer host-origin)
+	  (bytevector->pointer region)
+	  (bytevector->pointer buffer-row-pitch)
+	  (bytevector->pointer buffer-slice-pitch)
+	  (bytevector->pointer host-row-pitch)
+	  (bytevector->pointer host-slice-pitch)
+	  ptr
+	  (length events)
+	  (if (null? events)
+	      %null-pointer
+	      (list->bv
+	       '*
+	       (map (lambda (e)
+		      (pointer-address (unwrap 'cl_event e)))
+		    events)))
 	  ret-event))))
 
 (def-cl (clEnqueueFillBuffer q buff
@@ -1032,7 +1132,12 @@
 		  (pointer-address (unwrap 'cl_event e)))
 		events)))
       ret-event))))
-
+;; clEnqueueReadImage
+;; clEnqueueWriteImage
+;; clEnqueueFillImage
+;; clEnqueueCopyImage
+;; clEnqueueCopyImageToBuffer
+;; clEnqueueCopyBufferToImage
 (def-cl (clEnqueueMapBuffer q buffer flags size
 			    #:key
 			    (block? #t)
@@ -1041,25 +1146,61 @@
 			    (ret-event %null-pointer))
   '*
   (let* ([err-bv (allocate '* 1)]
-	 [ret (begin
-		(api (unwrap 'cl_command_queue q)
-		     (unwrap 'cl_mem buffer)
-		     (if block? cln:CL_TRUE cln:CL_FALSE)
-		     flags
-		     offset
-		     size
-		     (length events)
-		     (if (null? events)
-			 %null-pointer
-			 (list->bv
-			  '*
-			  (map (lambda (e)
-				 (pointer-address (unwrap 'cl_event e)))
-			       events)))
-		     (if (opq:cl_event? ret-event)
-			 (unwrap 'cl_event ret-event)
-			 %null-pointer)
-		     (bytevector->pointer err-bv)))]
+	 [ret (api (unwrap 'cl_command_queue q)
+		   (unwrap 'cl_mem buffer)
+		   (if block? cln:CL_TRUE cln:CL_FALSE)
+		   flags
+		   offset
+		   size
+		   (length events)
+		   (if (null? events)
+		       %null-pointer
+		       (list->bv
+			'*
+			(map (lambda (e)
+			       (pointer-address (unwrap 'cl_event e)))
+			     events)))
+		   (if (opq:cl_event? ret-event)
+		       (unwrap 'cl_event ret-event)
+		       %null-pointer)
+		   (bytevector->pointer err-bv))]
+	 [err (refbv '* err-bv 0)])
+    (if (< err 0)
+	(find-error err)
+	ret)))
+(def-cl (clEnqueueMapImage q image flags origin region
+			   image-row-pitch
+			   image-slice-pitch
+			   #:key
+			   (events '())
+			   (ret-event %null-pointer)
+			   (block #t))
+  '*
+  (let* ([err-bv (allocate '* 1)]
+	 [origin-bv (list->bv size_t origin)]
+	 [region-bv (list->bv size_t region)]
+	 [image-row-pitch-bv (list->bv size_t image-row-pitch)]
+	 [image-slice-pitch-bv (list->bv size_t image-slice-pitch)]
+	 [ret (api ((unwrap 'cl_command_queue q)
+		    (unwrap 'cl_mem image)
+		    (if block cln:CL_TRUE cln:CL_FALSE)
+		    flags
+		    (bytevector->pointer origin-bv)
+		    (bytevector->pointer region-bv)
+		    (bytevector->pointer image-row-pitch-bv)
+		    (bytevector->pointer image-slice-pitch-bv)
+		    (length events)
+		    (if (null? events)
+			%null-pointer
+			(list->bv
+			 '*
+			 (map (lambda (e)
+				(pointer-address (unwrap 'cl_event e)))
+			      events)))
+		    (if (opq:cl_event? ret-event)
+			(unwrap 'cl_event ret-event)
+			%null-pointer)
+		    (bytevector->pointer err-bv)))]
 	 [err (refbv '* err-bv 0)])
     (if (< err 0)
 	(find-error err)
@@ -1082,6 +1223,27 @@
 		    (pointer-address (unwrap 'cl_event e)))
 		  event-wait-list)))
 	event)))
+(def-cl (clEnqueueMigrateMemObjects q mems flags
+				    #:key
+				    (events '())
+				    (ret-event %null-pointer))
+  cl_int
+  (find-error
+   (api q
+	(length mems)
+	(list->bv cl_mem mems)
+	flags
+	(length events)
+	(if (null? events)
+	    %null-pointer
+	    (list->bv
+	     '*
+	     (map (lambda (e)
+		    (pointer-address (unwrap 'cl_event e)))
+		  events)))
+	(if (opq:cl_event? ret-event)
+	    (unwrap 'cl_event ret-event)
+	    %null-pointer))))
 (def-cl (clEnqueueNDRangeKernel q kernel global_work_size
 				#:key
 				(work_dim (length global_work_size))
@@ -1116,72 +1278,280 @@
 		(pointer-address (unwrap 'cl_event e)))
 	      events)))
     ret-event)))
+;; clEnqueueNativeKernel
+(def-cl (clEnqueueMarkerWithWaitList q
+				     #:key
+				     (events '())
+				     (ret-event %null-pointer))
+  cl_int
+  (find-error
+   (api
+    (unwrap 'cl_command_queue q)
+    (length events)
+    (if (null? events)
+	%null-pointer
+	(list->bv
+	 '*
+	 (map (lambda (e)
+		(pointer-address (unwrap 'cl_event e)))
+	      events)))
+    (if (opq:cl_event? ret-event)
+	(unwrap 'cl_event ret-event)
+	%null-pointer))))
+(def-cl (clEnqueueBarrierWithWaitList q #:key
+				      (events '())
+				      (ret-event %null-pointer))
+  cl_int
+  (find-error
+   (api (unwrap 'cl_command_queue q)
+	(length events)
+	(if (null? events)
+	    %null-pointer
+	    (list->bv
+	     '*
+	     (map (lambda (e)
+		    (pointer-address (unwrap 'cl_event e)))
+		  events)))
+	(if (opq:cl_event? ret-event)
+	    (unwrap 'cl_event ret-event)
+	    %null-pointer))))
+(def-cl (clEnqueueSVMFree q ptr-list
+			  #:key
+			  (notify  %null-pointer)
+			  (user-data  %null-pointer)
+			  (events '())
+			  (ret-event %null-pointer))
+  cl_int
+  (api (unwrap 'cl_command_queue q)
+       (length ptr-list)
+       (list->bv '* (map pointer-address ptr-list))
+       notify
+       user-data
+       (length events)
+       (if (null? events)
+	   %null-pointer
+	   (list->bv
+	    '*
+	    (map (lambda (e)
+		   (pointer-address (unwrap 'cl_event e)))
+		 events)))
+       (if (opq:cl_event? ret-event)
+	   (unwrap 'cl_event ret-event)
+	   %null-pointer)))
+(def-cl (clEnqueueSVMMemcpy q dst-ptr src-ptr size
+			    #:key
+			    (block? #t)
+			    (events '())
+			    (ret-event %null-pointer))
+  cl_int
+  (find-error
+   (api
+    (unwrap 'cl_command_queue q)
+    (if block? cln:CL_TRUE cln:CL_FALSE)
+    dst-ptr
+    src-ptr
+    size
+    (length events)
+    (if (null? events)
+	%null-pointer
+	(list->bv
+	 '*
+	 (map (lambda (e)
+		(pointer-address (unwrap 'cl_event e)))
+	      events)))
+    (if (opq:cl_event? ret-event)
+	(unwrap 'cl_event ret-event)
+	%null-pointer))))
+(def-cl (clEnqueueSVMMemFill q ptr pattern size
+			     #:key
+			     (events '())
+			     (ret-event %null-pointer))
+  cl_int
+  (find-error
+   (api (unwrap 'cl_command_queue q)
+	ptr
+	(bytevector->pointer pattern)
+	(bytevector-length pattern)
+	size
+	(length events)
+	(if (null? events)
+	    %null-pointer
+	    (list->bv
+	     '*
+	     (map (lambda (e)
+		    (pointer-address (unwrap 'cl_event e)))
+		  events)))
+	(if (opq:cl_event? ret-event)
+	    (unwrap 'cl_event ret-event)
+	    %null-pointer))))
+(def-cl (clEnqueueSVMMap q flags ptr size
+			 #:key
+			 (block? #t)
+			 (events '())
+			 (ret-event %null-pointer))
+  cl_int
+  (find-error
+   (api (unwrap 'cl_command_queue q)
+	(if block? cln:CL_TRUE cln:CL_FALSE)
+	flags
+	ptr
+	size
+	(length events)
+	(if (null? events)
+	    %null-pointer
+	    (list->bv
+	     '*
+	     (map (lambda (e)
+		    (pointer-address (unwrap 'cl_event e)))
+		  events)))
+	(if (opq:cl_event? ret-event)
+	    (unwrap 'cl_event ret-event)
+	    %null-pointer))))
+(def-cl (clEnqueueSVMUnmap q ptr
+			   #:key
+			   (events '())
+			   (ret-event %null-pointer))
+  cl_int
+  (find-error
+   (api (unwrap 'cl_command_queue q)
+	ptr
+	(length events)
+	(if (null? events)
+	    %null-pointer
+	    (list->bv
+	     '*
+	     (map (lambda (e)
+		    (pointer-address (unwrap 'cl_event e)))
+		  events)))
+	(if (opq:cl_event? ret-event)
+	    (unwrap 'cl_event ret-event)
+	    %null-pointer))))
+(def-cl (clEnqueueSVMMigrateMem q ptrs sizes flags
+				#:key
+				(events '())
+				(ret-event %null-pointer))
+  cl_int
+  (find-error (api (unwrap 'cl_command_queue q)
+		   (length ptrs)
+		   (bytevector->pointer (list->bv '* (map pointer-address ptrs)))
+		   (bytevector->pointer (list->bv size_t sizes))
+		   flags
+		   (length events)
+		   (if (null? events)
+		       %null-pointer
+		       (list->bv
+			'*
+			(map (lambda (e)
+			       (pointer-address (unwrap 'cl_event e)))
+			     events)))
+		   (if (opq:cl_event? ret-event)
+		       (unwrap 'cl_event ret-event)
+		       %null-pointer))))
+(def-cl (clGetExtensionFunctionAddressForPlatform platform name-str)
+  '*
+  (api (unwrap 'cl_platform_id platform)
+       (string->pointer name-str)))
+;; (def-cl (clSetCommandQueueProperty q prop-bv )
+;;   cl_int
+;;   (command_queue cl_command_queue no-ptr no-const)
+;;   (properties cl_command_queue_properties no-ptr no-const)
+;;   (enable cl_bool no-ptr no-const)
+;;   (old_properties cl_command_queue_properties ptr no-const))
+;; clCreateImage2D
+;; clCreateImage3D
 (def-cl (clEnqueueMarker q event)
   cl_int
   (find-error (api (unwrap 'cl_command_queue q)
 		   event)))
-
-(def-cl (clCreateUserEvent ctx)
-  cl_event
-  (let* ([err-bv (allocate cl_int 1)]
-	 [ev (api (unwrap 'cl_context ctx)
-		  (bytevector->pointer err-bv))]
-	 [err (refbv cl_int err-bv 0)])
-    (if (< err 0)
-	(resolve-error 'cl-error err)
-	(wrap 'cl_event ev))))
-(def-cl (clGetEventInfo event param-name count)
-  cl_int
-  (let* ([pbv (allocate-info-bv 'event-info param-name count)]
-	 [ret-size-bv (allocate size_t 1)]
-	 [ret (api (unwrap 'cl_event event)
-		   param-name
-		   (bytevector-length pbv)
-		   (bytevector->pointer pbv)
-		   (bytevector->pointer ret-size-bv))]
-	 [ret-size (refbv size_t ret-size-bv 0)])
-    (if (< ret 0)
-	(resolve-error 'cl-error ret)
-	(read-info 'event-info
-		   param-name
-		   pbv
-		   (bytes->count 'event-info param-name ret-size)))))
-(def-cl (clGetEventProfilingInfo event param-name count)
-  ;; event param_name param_value_size param_value param_value_size_ret
-  cl_int
-  (let* ([pbv (allocate-info-bv 'event-profiling-info param-name count)]
-	 [ret-size-bv (allocate size_t 1)]
-	 [ret (api (unwrap 'cl_event event)
-		   param-name
-		   (bytevector-length pbv)
-		   (bytevector->pointer pbv)
-		   (bytevector->pointer ret-size-bv))]
-	 [ret-size (refbv size_t ret-size-bv 0)])
-    (if (< ret 0)
-	(resolve-error 'cl-error ret)
-	(read-info 'event-profiling-info
-		   param-name
-		   pbv
-		   (bytes->count 'event-profiling-info param-name ret-size)))))
-(def-cl (clRetainEvent event) cl_int
-  (find-error (api (unwrap 'cl_event event))))
-(def-cl (clReleaseEvent event) cl_int
-  (find-error (api (unwrap 'cl_event event))))
-(def-cl (clSetUserEventStatus event status)
-  cl_int
-  (find-error (api (unwrap 'cl_event event) status)))
-(def-cl (clSetEventCallback event type pfn-notify user-data)
+(def-cl (clEnqueueWaitForEvents q events)
   cl_int
   (find-error
-   (api (unwrap 'cl_event event)
-	type
-	pfn-notify
-	user-data)))
-(def-cl (clWaitForEvents events)
+   (api (unwrap 'cl_command_queue q)
+	(length events)
+	(if (null? events)
+	    %null-pointer
+	    (list->bv
+	     '*
+	     (map (lambda (e)
+		    (pointer-address (unwrap 'cl_event e)))
+		  events))))))
+(def-cl (clEnqueueBarrier q
+			  #:key
+			  (events '())
+			  (ret-event %null-pointer))
   cl_int
-  (find-error (api (length events)
-		   (bytevector->pointer
-		    (list->bv 'cl_event events)))))
+  (find-error
+   (api (unwrap 'cl_command_queue q)
+	(length events)
+	(if (null? events)
+	    %null-pointer
+	    (list->bv
+	     '*
+	     (map (lambda (e)
+		    (pointer-address (unwrap 'cl_event e)))
+		  events)))
+	(if (opq:cl_event? ret-event)
+	    (unwrap 'cl_event ret-event)
+	    %null-pointer))))
+(def-cl (clUnloadCompiler)
+  cl_int
+  (find-error (api)))
+(def-cl (clGetExtensionFunctionAddress name) '* (api (string->pointer name)))
+(def-cl (clCreateCommandQueue ctx dev #:key (props %null-pointer))
+  cl_command_queue
+  (let* ([err-bv (allocate cl_int 1)]
+	 [q (api (unwrap 'cl_context ctx)
+		 (unwrap 'cl_device_id dev)
+		 (if (bytevector? props)
+		     (bytevector->pointer props)
+		     %null-pointer)
+		 (bytevector->pointer err-bv))]
+	 [err (refbv cl_int err-bv 0)])
+    (if (< err 0)
+	(find-error err)
+	(wrap 'cl_command_queue q)))
+  props)
+
+(def-cl (clCreateSampler ctx
+			 normalized-cords
+			 addressing-mode
+			 filter-mode)
+  cl_sampler
+  (let* ([err-bv (allocate cl_int 1)]
+	 [samp (api (unwrap 'cl_context ctx)
+		    (if normalized-cords cln:CL_TRUE cln:CL_FALSE)
+		    addressing-mode
+		    filter-mode
+		    (bytevector->pointer err-bv))]
+	 [err (refbv cl_int err-bv 0)])
+    (if (< err 0)
+	(find-error err)
+	(wrap 'cl_sampler samp))))
+(def-cl (clEnqueueTask q kernel
+		       #:key
+		       (events '())
+		       (ret-event %null-pointer))
+  cl_int
+  (find-error (api (unwrap 'cl_command_queue q)
+		   (unwrap 'cl_kernel kernel)
+		   (length events)
+		   (if (null? events)
+		       %null-pointer
+		       (list->bv
+			'*
+			(map (lambda (e)
+			       (pointer-address (unwrap 'cl_event e)))
+			     events)))
+		   (if (opq:cl_event? ret-event)
+		       (unwrap 'cl_event ret-event)
+		       %null-pointer))))
+;; clGetLayerInfo
+;; clInitLayer
+;; clInitLayerWithProperties
+;; clDeinitLayer
+;; clGetICDLoaderInfoOCLICD
+;; clCancelCommandsIMG
+1
 
 ;; (def-cl (clEnqueueNativeKernel q
 ;;			       num-mem-objects
@@ -1266,10 +1636,12 @@
 ;;	   (make-prop-bv cl_command_queue_properties
 ;;			 cln:CL_QUEUE_PROPERTIES
 ;;			 cln:CL_QUEUE_PROFILING_ENABLE)))
+
 ;; (define aptr (enqueue-map-buffer
 ;;	      q abuff
 ;;	      (logior cln:CL_MAP_READ cln:CL_MAP_WRITE)
 ;;	      (* count (sizeof float))))
+
 ;; (define bptr (enqueue-map-buffer
 ;;	      q bbuff
 ;;	      (logior cln:CL_MAP_READ cln:CL_MAP_WRITE)
