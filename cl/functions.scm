@@ -129,7 +129,8 @@
       (f i)
       (loop (1+ i)))))
 
-(def-cl (clGetPlatformIDs count) cl_int
+(def-cl (clGetPlatformIDs count)
+  cl_int
   (let* ([platforms-bv (allocate cl_platform_id  count)]
 	 [ret-count-bv (allocate cl_uint 1)]
 	 [ret (clGetPlatformIDs count

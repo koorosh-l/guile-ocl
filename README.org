@@ -1,1 +1,368 @@
-OpenCL bindings for guile scheme
+#+title: OpenCL bindings for guile scheme
+* tutorial
+#+begin_src scheme
+  (use-modules (cl array))
+  (use-modules (cl functions))
+  (define count 1024)
+  (define plat
+    (list-ref (get-platform-ids 10) 0))
+  (define d (car (get-device-ids plat)))
+  (define ctx (create-context (list d)))
+
+  (define il-bv (call-with-input-file
+                    "/home/quasikote/proj/scheme-gpgpu/playground/kernel.spv"
+                (@ (ice-9 binary-ports) get-bytevector-all)))
+  (define prog (create-program-with-il ctx il-bv))
+  (define kernel (begin (build-program
+                         prog (list d)
+                         #:options "-cl-fast-relaxed-math")
+                        (create-kernel prog "axpy")))
+
+  (define abuff
+    (create-buffer
+     ctx
+     (logior cln:CL_MEM_READ_WRITE cln:CL_MEM_ALLOC_HOST_PTR)
+     %null-pointer
+     (* count (sizeof float))))
+  (define bbuff
+    (create-buffer
+     ctx
+     (logior cln:CL_MEM_READ_WRITE cln:CL_MEM_ALLOC_HOST_PTR)
+     %null-pointer
+     (* count (sizeof float))))
+
+  (set-kernel-arg kernel 0 `(10 . ,cl_float))
+  (set-kernel-arg kernel 1 abuff)
+  (set-kernel-arg kernel 2 bbuff)
+
+  (define q (create-command-queue-with-properties
+             ctx d
+             #:properties
+             (make-prop-bv cl_command_queue_properties
+                         cln:CL_QUEUE_PROPERTIES
+                         cln:CL_QUEUE_PROFILING_ENABLE)))
+
+  (define aptr (enqueue-map-buffer
+                q abuff
+                (logior cln:CL_MAP_READ cln:CL_MAP_WRITE)
+                (* count (sizeof float))))
+
+  (define bptr (enqueue-map-buffer
+                q bbuff
+                (logior cln:CL_MAP_READ cln:CL_MAP_WRITE)
+                (* count (sizeof float))))
+  (define abv (ffi:pointer->bytevector aptr (* count (sizeof float))))
+  (define bbv (ffi:pointer->bytevector bptr (* count (sizeof float))))
+  (bv->f32vector! abv)
+  (bv->f32vector! bbv)
+  (array-map! abv
+              (lambda ()
+                (random 10)))
+  (array-map! bbv
+              (lambda ()
+                (random 10)))
+  (enqueue-unmap-mem-object q abuff aptr)
+  (enqueue-unmap-mem-object q bbuff bptr)
+  (define event (opq:opaque-instance 'cl_event 0))
+  (display "----------------------------------------\n")
+  (enqueue-nd-range-kernel q kernel `(,count)
+                         #:local-work-size `(32)
+                         #:ret-event (opq:& event))
+  (finish q)
+  (format (current-output-port)
+        "~a ~a ~a\n"
+        (string-take (get-device-info d cln:CL_DEVICE_NAME 128)
+                       18)
+        count
+        (-
+         (get-event-profiling-info
+            event
+            cln:CL_PROFILING_COMMAND_END 8)
+         (get-event-profiling-info
+            event
+            cln:CL_PROFILING_COMMAND_START 8)))
+  (display "----------------------------------------\n")
+  (release-mem-object abuff)
+  (release-mem-object bbuff)
+  (release-command-queue q)
+  (release-program prog)
+  (release-context ctx)
+  (define (test)
+    (enqueue-nd-range-kernel
+     q kernel `(,count)
+     #:ret-event (opq:& event))
+    (finish q)
+    (format (current-output-port)
+            "~a ~a ~a\n"
+            (string-take (get-device-info d cln:CL_DEVICE_NAME 128)
+                         18)
+            count
+            (-
+             (get-event-profiling-info
+              event
+              cln:CL_PROFILING_COMMAND_END 8)
+             (get-event-profiling-info
+              event
+              cln:CL_PROFILING_COMMAND_START 8))))
+
+#+end_src
+
+* Unsupported
+- Functions related to DX* or OpenGL interop
+- Functions related to images
+- Platform Specific Functions
+* API
+** (cl)
+Imports all the functions needed for getting started, if you need more
+control over the exported names (renaming or prefix) manually import
+the modules you need.
+
+Modules automatically imported:
+- (cl config)
+- (cl enums)
+- (cl functions)
+- (cl types)
+
+** (cl array)
+*THE FUNCTION IN THIS MODULE ARE EXTREMELY UNSAFE*
+OpenCL has multiple way for creating/allocating buffers, you can
+allocate bytevectors yourself and create buffers from them or you can
+use CL_MEM_ALLOC_HOST_PTR with create-buffer so the OpenCL runtime
+allocates the buffer for you.
+
+When the buffer is allocated by the OpenCL runtime, the user will have
+a pointer to the buffer this can easily be converted to a bytevector
+however this can be tedious to work with.
+
+Functions in this module provide a way for converting Guile
+bytevectors to typed-arrays by looking up the magic number at the
+start of a typed-array and modifying the internal structure of the
+object passed to them.
+
+Example use case:
+#+begin_src scheme
+  (use-modules (cl array)
+               (cl functions)
+               ((system foreign) #:prefix ffi:))
+
+  (define abuff
+    (create-buffer
+     ctx
+     (logior cln:CL_MEM_READ_WRITE cln:CL_MEM_ALLOC_HOST_PTR)
+     %null-pointer
+     (* count (sizeof cl_float))))
+
+  (define ptr (enqueue-map-buffer
+               q abuff
+               (logior cln:CL_MAP_READ cln:CL_MAP_WRITE)
+               (* count (sizeof float))))
+
+  (define bv (ffi:pointer->bytevector aptr (* count (sizeof float))))
+
+  (display bv) (newline) ;; #vu8(0 0 ...)
+  (bv->f32vector! bv)
+  (display bv) (newline) ;; #u32(0 0 0 0 0)
+
+  (array-map! abv (lambda () (random 10)))
+#+end_src
+
+- bv->u8vector!
+  convert a bytevector to a typed-array
+- bv->s8vector!
+- bv->u16vector!
+- bv->s16vector!
+- bv->u32vector!
+- bv->s32vector!
+- bv->u64vector!
+- bv->s64vector!
+- bv->f32vector!
+- bv->f64vector!
+- bv->c32vector!
+- bv->c64vector!
+
+** (cl enums)
+Contains all the names defined in a header file using #define, names
+are identical to their OpenCl counterparts.
+** (cl ffi)
+Contains all the functions that OpenCL defines, functions in this
+module are useful for low level access to the API, there are no
+abstractions for ease of use.
+
+Not all functions exported here have a saner version in (cl
+functions).
+
+Name of the functions are the same as their C counterparts.
+** (cl functions)
+Contains high level implementation for most of the functions exported
+in (cl ffi).
+*** Naming Convention
+The cl prefix is dropped if and capitalized words in the function name
+are separated using dashes, if the functions name has underscores it
+is also converted to dashes.
+*** interface
+- (make-prop-bv type . l)
+- (get-platform-ids count) <<pid>>
+  Returns a list of available platforms with maximum size of count.
+- (get-platform-info platform-id param-name count) <<pinfo>>
+  Quarries information about the platform specified by platform-id.
+  - param-name:
+    A number specified in (cl types info) and (cl enums).
+  - count:
+    Specifies the length of the array that should be allocated
+    for the returned, for example if quarrying CL_PLATFORM_NAME
+    this specifies the size of the string, or if the a parameter
+    returns a value of type size_t * this would specify how long
+    the array is.
+- (get-device-ids count)
+  similar to [[pid][get-platform-id]]
+- (get-device-info device-id param-name count)
+  similar to [[pinfo][get-platform-info]]
+- (create-sub-devices device properties num-sub-devices)
+  returns a list of <cl_device_id>s.
+  - device: a <cl_device_id>.
+  - properties: a bytevector created using the make-prop-bv.
+  - num-sub-devices: number of sub devices to be created.
+- (retain-device device)
+  Increases the reference count of device.
+- (release-device device)
+  Decreases the reference count of device.
+- (set-default-device-command-queue ctx dev q)
+- get-device-and-host-timer
+- get-host-timer
+- create-context
+- create-context-from-type
+- (retain-context ctx)
+  Increases the reference count of ctx.
+- (release-context ctx)
+  Decreases the reference count of ctx.
+- get-context-info
+- set-context-destructor-callback
+- create-command-queue-with-properties
+- (retain-command-queue q)
+  Increases the reference count of q.
+- (release-command-queue q)
+  Decreases the reference count of q.
+- get-command-queue-info
+- create-buffer
+- create-buffer-with-properties
+- create-sub-buffer
+- create-image
+- create-image-with-properties
+- create-pipe
+- (retain-mem-object mem)
+  Increases the reference count of mem.
+- (release-mem-object mem)
+  Decreases the reference count of mem.
+- get-supported-image-formats
+- get-mem-object-info
+- get-image-info
+- get-pipe-info
+- set-mem-object-destructor-callback
+- svm-alloc
+- svm-free
+- create-sampler-with-properties
+- (retain-sampler sampler)
+  Increases the reference count of sampler.
+- (release-sampler sampler)
+  Decreases the reference count of sampler.
+- get-sampler-info
+- create-program-with-source
+- create-program-with-binary
+- create-program-with-built-in-kernels
+- create-program-with-il
+- (retain-program program)
+  Increases the reference count of program.
+- (release-program program)
+  Decreases the reference count of program.
+- build-program
+- compile-program
+- link-program
+- set-program-release-callback
+- set-program-specialization-constant
+- unload-platform-compiler
+- get-program-info
+- get-program-build-info
+- create-kernel
+- create-kernels-in-program
+- clone-kernel
+- (retain-kernel kernel)
+  Increases the reference count of kernel.
+- (release-kernel kernel)
+  Decreases the reference count of kernel.
+- set-kernel-arg
+- set-kernel-arg-svm-pointer
+- set-kernel-exec-info
+- get-kernel-info
+- get-kernel-arg-info
+- get-kernel-work-group-info
+- get-kernel-sub-group-info
+- wait-for-events
+- get-event-info
+- create-user-event
+- (retain-event event)
+  Increases the reference count of event.
+- (release-event event)
+  Decreases the reference count of event.
+- set-user-event-status
+- set-event-callback
+- get-event-profiling-info
+- flush
+- finish
+- enqueue-read-buffer
+- enqueue-read-buffer-rect
+- enqueue-write-buffer
+- enqueue-write-buffer-rect
+- enqueue-fill-buffer
+- enqueue-copy-buffer
+- enqueue-copy-buffer-rect
+- enqueue-read-image
+- enqueue-write-image
+- enqueue-fill-image
+- enqueue-copy-image
+- enqueue-copy-image-to-buffer
+- enqueue-copy-buffer-to-image
+- enqueue-map-buffer
+- enqueue-map-image
+- enqueue-unmap-mem-object
+- enqueue-migrate-mem-objects
+- enqueue-nd-range-kernel
+- enqueue-native-kernel
+- enqueue-marker-with-wait-list
+- enqueue-barrier-with-wait-list
+- enqueue-svm-free
+- enqueue-svm-memcpy
+- enqueue-svm-mem-fill
+- enqueue-svm-map
+- enqueue-svm-unmap
+- enqueue-svm-migrate-mem
+- get-extension-function-address-for-platform
+- set-command-queue-property
+- create-image2d
+- create-image3d
+- enqueue-marker
+- enqueue-wait-for-events
+- enqueue-barrier
+- unload-compiler
+- get-extension-function-address
+- create-command-queue
+- create-sampler
+- enqueue-task
+- get-layer-info
+- init-layer
+- init-layer-with-properties
+- deinit-layer
+- get-icd-loader-info-ocl-icd
+- cancel-commands-img
+
+** (cl spec)
+Exports _cl2_ which is a list containing the function specification of
+the OpenCL API for use in (cl ffi)
+** (cl structs)
+Provides functions for creating c-structs for use with API functions.
+- (image-format #:channel-order #:channel-type)
+** (cl types)
+** (cl types basic)
+** (cl types derived)
+** (cl types error)
+** (cl types info)
+** (cl types opaque)
